@@ -1,2 +1,2 @@
-# chrono.me
-easy handle time
+# chrono-me
+WIP
