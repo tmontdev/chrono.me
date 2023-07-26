@@ -1,6 +1,6 @@
 {
   "name": "chrono-me",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "easy handle time",
   "typings": "dist/index.d.ts",
   "main": "dist/index.js",
@@ -15,9 +15,9 @@
   "files": [
     "dist/**/*"
   ],
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": ["date", "time", "datetime", "timezone", "chronos", "moment", "luxon"],
+  "author": "tmontdev<tmontdev@gmail.com>",
+  "license": "MIT",
   "bugs": {
     "url": "https://github.com/tmontdev/chrono.me/issues"
   },

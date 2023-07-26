@@ -1,5 +1,4 @@
 import * as tzif from 'tzif';
-import {getInfo} from '../dist';
 
 export enum TimeZone {
     'Africa/Algiers' = 'Africa/Algiers',
