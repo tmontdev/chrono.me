@@ -1,6 +1,6 @@
-import {DateTime, } from '../index';
-import {units} from '../units/units';
+import {DateTime, TimeZone, units} from '../index';
 
 const now = new DateTime();
-const quarta = now.add(2, units.day);
-console.log(now.isValid, quarta.isValid);
+const utc = new DateTime(new Date(), TimeZone.UTC);
+
+console.log(utc.unix(), now.unix());
