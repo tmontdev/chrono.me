@@ -1,4 +1,5 @@
 import * as tzif from 'tzif';
+import {match} from 'assert';
 
 export enum TimeZone {
     'Africa/Algiers' = 'Africa/Algiers',
@@ -531,7 +532,6 @@ export enum TimeZone {
     'America/Puerto_Rico' = 'America/Puerto_Rico',
     'America/Miquelon' = 'America/Miquelon',
     'America/Grand_Turk' = 'America/Grand_Turk',
-    'US/Pacific-New' = 'US/Pacific-New',
     'America/Argentina/Buenos_Aires' = 'America/Argentina/Buenos_Aires',
     'America/Argentina/Cordoba' = 'America/Argentina/Cordoba',
     'America/Argentina/Salta' = 'America/Argentina/Salta',
@@ -599,7 +599,7 @@ export enum TimeZone {
 
 export type TimeZoneInfo = {
     idx?: number
-    name: TimeZone | string;
+    name?: TimeZone | string;
     offset?: number;
     isDST?: boolean;
     abbrev?: string;
@@ -611,15 +611,15 @@ function tztoinfo(tz: tzif.LocalInfo, name: string): TimeZoneInfo {
         name,
         abbrev: tz.abbrev,
         idx: tz.idx,
-        isDST: tz.tt_isdst
-    }
+        isDST: tz.tt_isdst,
+    };
 }
 
 function findInfo(tz: TimeZone, date?: Date): TimeZoneInfo {
-    if(!date) date = new Date();
+    if (!date) date = new Date();
     const tzfile = tzif.parse(tz);
-    const tzlocal = tzif.findTimeZoneIn(tzfile, date!.valueOf())
-    return tztoinfo(tzlocal, tz)
+    const tzlocal = tzif.findTimeZoneIn(tzfile, date!.valueOf());
+    return tztoinfo(tzlocal, tz);
 }
 
 export enum units {
@@ -631,7 +631,7 @@ export enum units {
     week = 'week',
     month = 'month',
     year = 'year'
-};
+}
 
 export enum unitFactor {
     millisecond = 1,
@@ -642,89 +642,307 @@ export enum unitFactor {
     week = day * 7
 }
 
+export enum maxUnitValue {
+    millisecond = 999,
+    second= 59,
+    minute = 59,
+    hour =23,
+}
+
+const formatReplacers: {[key: string]: (dt: DateTime) => string} = {
+    'YYYY': (dt: DateTime): string => {
+        return `${dt.date.getFullYear()}`.padStart(4, '0');
+    },
+    'ZZZZ': (dt: DateTime): string => {
+        return dt.getTimeZoneInfo()?.name!;
+    },
+    'ZZZ': (dt: DateTime): string => {
+        return dt.getTimeZoneInfo()?.abbrev!;
+    },
+    'SSS': (dt: DateTime): string => {
+        return `${dt.date.getMilliseconds()}`.padStart(3, '0');
+    },
+    'ss': (dt: DateTime): string => {
+        return `${dt.date.getSeconds()}`.padStart(2, '0');
+    },
+    'SS': (dt: DateTime): string => {
+        return `${dt.date.getMilliseconds()}`.padStart(2, '0').slice(0, 2);
+    },
+    'MM': (dt: DateTime): string => {
+        return `${dt.date.getMonth()+1}`.padStart(2, '0');
+    },
+    'DD': (dt: DateTime): string => {
+        return `${dt.date.getDate()}`.padStart(2, '0');
+    },
+    'HH': (dt: DateTime): string => {
+        return `${dt.date.getHours()}`.padStart(2, '0');
+    },
+    'mm': (dt: DateTime): string => {
+        return `${dt.date.getMinutes()}`.padStart(2, '0');
+    },
+    'ZZ': (dt: DateTime): string => {
+        const offset = dt.getTimeZoneInfo()!.offset!;
+        const operator = offset < 0 ? '-' : offset == 0 ? '': '-';
+        const hours = `${Math.abs(offset)/unitFactor[units.hour]}`.padStart(2, '0');
+        const minutes = `${(Math.abs(offset)%unitFactor[units.hour])/unitFactor[units.minute]}`.padStart(2, '0');
+        return `${operator}${hours}${minutes}`;
+    },
+    'm': (dt: DateTime): string => {
+        return `${dt.date.getMinutes()}`;
+    },
+    'S': (dt: DateTime): string => {
+        return `${dt.date.getMilliseconds()}`.slice(0, 1);
+    },
+    's': (dt: DateTime): string => {
+        return `${dt.date.getSeconds()}`;
+    },
+    'z': (dt: DateTime): string => {
+        const offset = dt.getTimeZoneInfo()!.offset!;
+        const operator = offset < 0 ? '-' : offset == 0 ? '': '-';
+        const hours = `${Math.abs(offset)/unitFactor[units.hour]}`.padStart(2, '0');
+        const minutes = `${(Math.abs(offset)%unitFactor[units.hour])/unitFactor[units.minute]}`.padStart(2, '0');
+        return `${operator}${hours}:${minutes}`;
+    },
+
+    'X': (dt: DateTime): string => {
+        return `${dt.unix()/1000}`;
+    },
+    'x': (dt: DateTime): string => {
+        return `${dt.unix()}`;
+    },
+};
+
+
+function getUnitFactor(unit: units): number | undefined {
+    // @ts-ignore
+    return unitFactor[unit];
+}
+function isLeapYear(year: number): boolean {
+    return (0 == year % 4) && (0 != year % 100) || (0 == year % 400);
+}
+
+function checkAboveLastDayOfMonth(year: number, month: number, day: number): number {
+    if (day <= 28) return day;
+    if (month == 1 && day == 29 && !isLeapYear(year) ) {
+        return day -1;
+    }
+    let match = false;
+    while (!match) {
+        const date = new Date(year, month, day);
+        match = date.getDate() == day;
+        if (!match) day--;
+    }
+    return day;
+}
+
+function getEscapedOffsets(fmt: string): number[][] {
+    const regions: number[][] = [];
+    let position = 0;
+    while (position < fmt.length) {
+        const start = fmt.indexOf('[', position);
+        if (start < 0) {
+            break;
+        }
+        const end = fmt.indexOf(']', start);
+        if (end < 0) {
+            break;
+        }
+        regions.push([start, end+1]);
+        position = end;
+    }
+    return regions;
+}
+
+function format(dt: DateTime, fmt: string): string {
+    const escapes = getEscapedOffsets(fmt);
+    const slices: string[] = [];
+    let lastOffset = 0;
+    for (const escaped of escapes) {
+        slices.push(fmt.slice(lastOffset, escaped[0]));
+        slices.push(fmt.slice(escaped[0], escaped[1]));
+        lastOffset = escaped[1];
+    }
+    slices.push(fmt.slice(lastOffset));
+    for (const i in slices) {
+        // @ts-ignore
+        if (i % 2 == 0) {
+            if (slices[i]) {
+                for (const replacer of Object.keys(formatReplacers)) {
+                    if (slices[i].includes(replacer)) {
+                        slices[i] = slices[i].replace(replacer, formatReplacers[replacer](dt));
+                    }
+                }
+            }
+        } else {
+            slices[i] = slices[i].replace('[', '').replace(']', '');
+        }
+    }
+    return slices.join('');
+}
+
 // @ts-ignore
 // eslint-disable-next-line new-cap
 const local: TimeZone = TimeZone[Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'];
 const localtz: TimeZoneInfo = findInfo(local);
 
-enum formatKeys {
-    NumericMonth = 'M',
-    FullNumericMonth = 'MM',
-    SequentialMonth = 'Mo',
-    AbbrMonthName = 'MMM',
-    FullMonthName = 'MMMM',
-    NumericQuarter = 'Q',
-    SequentialQuarter = 'Qo',
-    NumericMonthDay = 'D',
-    FullNumericMonthDay = 'DD',
-    SequentialMonthDay = 'Do',
-    NumericYearDay = 'DDD',
-    SequentialYearDay = 'DDDo',
-    FullNumericYearDay = 'DDDD',
-    NumericWeekDay = 'd',
-    SequentialWeekDay = 'do',
-    TwoDigitWeekDayName = 'dd',
-    AbbrWeekDayName = 'ddd',
-    FullWeekDayName = 'dddd',
+let defaultTimeZone = localtz;
+
+export function setDefaultTimeZone(timezone: TimeZone):void {
+    defaultTimeZone = findInfo(timezone);
+}
+
+function computedTimezoneOffset(date: Date, tz: TimeZoneInfo): number {
+    const dateOffset = date.getTimezoneOffset() * unitFactor.minute;
+    const timezoneOffset = (tz?.offset || 0) * unitFactor.second;
+    return dateOffset + timezoneOffset;
+}
+
+function setupTimezone(date: Date, tz: TimeZoneInfo): Date {
+    return new Date(date.getTime() + computedTimezoneOffset(date, tz));
 }
 
 export class DateTime {
-    private _date: Date;
-    private timezone?: TimeZoneInfo;
+    #offset?: number;
+    date: Date;
+    #timezone?: TimeZoneInfo;
+
+    static now(): DateTime {
+        return new DateTime();
+    }
+
+    static utc(): DateTime {
+        return new DateTime(new Date(), TimeZone.UTC);
+    }
 
     get isValid(): boolean {
-        return !isNaN(this._date.valueOf()) &&
-            !!this.timezone?.idx &&
-            !isNaN(this.timezone.idx!);
+        return !isNaN(this.date.valueOf()) &&
+            !!this.#timezone?.idx &&
+            !isNaN(this.#timezone.idx!);
     }
 
+    /**
+     * @return {number} milliseconds since 1970-01-01T00:00:00.000
+     */
     unix(): number {
-        return this.getTime() - this.timezoneOffset();
+        return this.date.getTime() - this.getLocalTimeOffset();
     }
 
-    getTime(): number {
-        return this._date.getDate()
+    getLocalTimeOffset(): number {
+        if (!this.#offset) {
+            this.#offset = ((this.#timezone?.offset || 0) * unitFactor.second) +
+                (this.date.getTimezoneOffset() * unitFactor.minute);
+        }
+        return this.#offset!;
     }
 
-    //seconds
-    timezoneOffset(): number{
-        const to = (this.timezone?.offset || 0) * unitFactor.minute;
-        const lo = this._date.getTimezoneOffset() * unitFactor.second
-        return lo + to;
+    tz(timezone: TimeZone): DateTime {
+        return new DateTime(this.unix(), timezone);
     }
+
+    utc(): DateTime {
+        return new DateTime(this.unix(), TimeZone.UTC);
+    }
+
 
     add(amount: number, unit: units = units.millisecond): DateTime {
-        // @ts-ignore
-        const milli = this.unix() + (amount * unitFactor[unit]);
+        const factor = getUnitFactor(unit);
+        if (!factor) {
+            return this.#addNotFactored(amount, unit);
+        }
+        const milli = this.unix() + (amount * factor!);
         return new DateTime(milli);
+    }
+
+    #addNotFactored(amount: number, unit: units): DateTime {
+        let [year, month, day] = [this.date.getFullYear(), this.date.getMonth(), this.date.getDate()];
+
+        if (unit == units.year) {
+            year += amount;
+        }
+        if (unit == units.month) {
+            // year += Math.floor((month+amount)/12);
+            // month = Math.floor((month+amount)%12);
+            month += amount;
+        }
+        day = checkAboveLastDayOfMonth(year, month, day);
+        const date = new Date(
+            year,
+            month,
+            day,
+            this.date.getHours(),
+            this.date.getMinutes(),
+            this.date.getSeconds(),
+            this.date.getMilliseconds(),
+        );
+        return datetime(date.getTime() - computedTimezoneOffset(date, this.#timezone!), this.#timezone?.name);
     }
 
     sub(amount: number, unit: units = units.millisecond): DateTime {
-        // @ts-ignore
-        const milli = this.unix() + ((amount-1) * unitFactor[unit])
-        return new DateTime(milli);
+        return this.add(amount*-1, unit);
     }
 
+    clone(): DateTime {
+        return datetime(this.unix(), this.#timezone?.name);
+    }
 
+    isBefore(ref: DateTime): boolean {
+        return this.unix() < ref.unix();
+    }
+
+    isAfter(ref: DateTime): boolean {
+        return this.unix() > ref.unix();
+    }
+
+    isSame(ref: DateTime): boolean {
+        return this.unix() == ref.unix();
+    }
+
+    isSameOrBefore(ref: DateTime): boolean {
+        return this.unix() <= ref.unix();
+    }
+
+    isSameOrAfter(ref: DateTime): boolean {
+        return this.unix() >= ref.unix();
+    }
+
+    diff(ref: DateTime, unit?: units): number {
+        if (!unit) unit = units.millisecond;
+        const factor = getUnitFactor(unit);
+        if (factor) {
+            return (ref.unix() - this.unix()) / factor!;
+        }
+        throw Error('unit not factored still not supported');
+    }
+
+    format(pattern: string = 'YYYY-MM-DD[T]HH:mm:ss.SSS z'): string {
+        return format(this, pattern);
+    }
+
+    getTimeZoneInfo(): TimeZoneInfo | undefined {
+        return this.#timezone;
+    }
+
+    toString(): string {
+        return this.format();
+    }
+
+    /**
+     * returns the current time, in the default timezone. If default timezone is not set, the local will be assumed.
+     */
     constructor();
-    constructor(date?: string | number | Date);
-    constructor(date?: string | number | Date, timezone?: TimeZone);
+    constructor(date?: string | number | Date | DateTime);
+    constructor(date?: string | number | Date | DateTime, timezone?: TimeZone | string);
     constructor(...props: any[]) {
-        if (!props.length) {
-            this._date = new Date();
-        } else {
-            this._date = new Date(props.at(0));
-        }
-        if(props.at(1)){
-            this.timezone = findInfo(props.at(1), this._date)
-            return
-        }
-        this.timezone = localtz;
-        return;
+        const date = !props.length || !props.at(0) ?
+            new Date():
+            props.at(0) instanceof DateTime ?
+                new Date((props.at(0) as DateTime).unix()) :
+                new Date(props.at(0));
+        this.#timezone = props.at(1) ? findInfo(props.at(1), date) : defaultTimeZone || localtz;
+        this.date = setupTimezone(date, this.#timezone);
     }
 }
 
-export function datetime(date?: string | number | Date): DateTime {
-    return new DateTime(date);
+export function datetime(date?: string | number | Date, timezone?: TimeZone | string): DateTime {
+    return new DateTime(date, timezone);
 }
-

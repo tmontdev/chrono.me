@@ -17,6 +17,9 @@
         "@typescript-eslint"
     ],
     "rules": {
+        "require-jsdoc": "off",
+        "no-unused-vars": "off",
+        "max-len": ["warn", 150],
         "indent": [
             "error",
             4
